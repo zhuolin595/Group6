@@ -1,0 +1,181 @@
+---
+title: "strawberry"
+format: pdf
+editor: visual
+---
+
+## 1.Import packages
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(zoo)
+```
+
+## 2.Read and clean data
+
+```{r}
+df <- read.csv("~/Documents/MA_615/Group6/ACRES BEARING+PRICE RECEIVED+PRODUCTION+UTILIZED – PRODUCTION.csv")
+head(df)
+```
+
+```{r}
+new_df <- df %>%
+  clean_names() %>%
+  filter(df$Geo.Level == "NATIONAL", df$State == "US TOTAL") %>%
+  select(year, data_item, value) %>%
+  mutate(
+    year = as.numeric(year),
+    value = as.numeric(gsub(",", "", value))
+  ) %>%
+  filter(!is.na(value))
+
+head(new_df)
+```
+
+## 3.Pivot wider to make each variable a column
+
+```{r}
+strawberry <- new_df %>%
+  pivot_wider(
+    names_from = data_item,
+    values_from = value,
+    values_fn = mean  
+  )
+
+colnames(strawberry) <- c("Year", "Acres_Bearing", "Price_per_CWT",
+                          "Production_USD", "Utilized_Production_CWT")
+
+head(strawberry)
+```
+
+```{r}
+write_csv(strawberry, "clean_strawberry.csv")
+
+```
+
+## 4.Fill missing values
+
+```{r}
+strawberry <- strawberry %>%
+  arrange(Year) %>%
+  mutate(
+    Acres_Bearing = na.approx(Acres_Bearing, na.rm = FALSE),
+    Price_per_CWT = na.approx(Price_per_CWT, na.rm = FALSE),
+    Production_USD = na.approx(Production_USD, na.rm = FALSE),
+    Utilized_Production_CWT = na.approx(Utilized_Production_CWT, na.rm = FALSE)
+  )
+
+head(strawberry)
+```
+
+## 5.Compute key profitability metrics
+
+```{r}
+cost_per_acre <- 30000
+strawberry <- strawberry %>%
+  mutate(
+    Yield_per_Acre = Utilized_Production_CWT / Acres_Bearing,
+    Revenue_Est = Price_per_CWT * Utilized_Production_CWT,
+    Cost = Acres_Bearing * cost_per_acre,
+    Profit = Revenue_Est - Cost,
+    Profit_per_Acre = Profit / Acres_Bearing
+  )
+summary(strawberry)
+```
+
+## Plot1
+
+```{r}
+ggplot(strawberry %>% 
+         filter(!is.na(Acres_Bearing), !is.na(Profit_per_Acre)),  
+       aes(x = Acres_Bearing, y = Profit_per_Acre)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Profit per Acre vs Acres Bearing",
+       x = "Acres Bearing", y = "Profit per Acre") +
+  theme_minimal()
+```
+
+Explanation: This plot shows a slight negative relationship between Acres Bearing and Profit per Acre. As the total strawberry area increases, the profit per acre tends to decrease a little. This suggests that expanding the growing area might raise total cost faster than revenue. It means efficiency per acre may drop when production scale becomes larger.
+
+## Plot2
+
+```{r}
+ggplot(
+  strawberry %>%
+    filter(!is.na(Price_per_CWT), !is.na(Profit_per_Acre)),  
+  aes(x = Price_per_CWT, y = Profit_per_Acre)
+) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Profit per Acre vs Price per CWT",
+    x = "Price ($/CWT)",
+    y = "Profit per Acre"
+  ) +
+  theme_minimal()
+```
+
+Explanation: This plot shows a clear positive relationship between Price per CWT and Profit per Acre. When the selling price of strawberries increases, the profit per acre also goes up. This means that market price is an important factor driving profitability. Higher prices directly improve revenue and help farmers earn more profit per unit of land.
+
+## Plot3
+
+```{r}
+ggplot(
+  strawberry %>%
+    filter(!is.na(Production_USD), !is.na(Profit_per_Acre)), 
+  aes(x = Production_USD, y = Profit_per_Acre)
+) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Profit per Acre vs Production Value",
+    x = "Production (USD)",
+    y = "Profit per Acre"
+  ) +
+  theme_minimal()
+
+```
+
+Explanation: This plot shows a positive relationship between Production Value and Profit per Acre. When the total production value increases, farms tend to earn more profit per acre. It means that higher sales or output usually lead to better profitability.
+
+## Plot4
+
+```{r}
+ggplot(
+  strawberry %>%
+    filter(!is.na(Utilized_Production_CWT), !is.na(Profit_per_Acre)), 
+  aes(x = Utilized_Production_CWT, y = Profit_per_Acre)
+) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Profit per Acre vs Utilized Production",
+    x = "Utilized Production (CWT)",
+    y = "Profit per Acre"
+  ) +
+  theme_minimal()
+```
+
+Explanation: This plot shows a positive relationship between Utilized Production and Profit per Acre. As the amount of strawberries sold or used increases, the profit per acre also rises. This means that selling more products helps farmers gain higher efficiency and income.
+
+## 6.Correlation
+
+```{r}
+corr <- strawberry %>%
+  select(Acres_Bearing, Price_per_CWT, Production_USD,
+         Utilized_Production_CWT, Profit_per_Acre) %>%
+  cor(use = "pairwise.complete.obs")
+print(round(corr, 3))
+```
+
+## 7.Model
+
+```{r}
+model <- lm(Profit_per_Acre ~ Acres_Bearing + Price_per_CWT +
+              Production_USD + Utilized_Production_CWT,
+            data = strawberry)
+summary(model)
+plot(model, which = 1)
+```
